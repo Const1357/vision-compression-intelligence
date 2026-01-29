@@ -14,8 +14,10 @@ def set_seed(seed=SEED):
         torch.cuda.manual_seed_all(seed)
 set_seed()
 
+# Define the Model Types
 MODEL_TYPES = ['VQ-GAN', 'RQ-Transformer', 'LlamaGen', 'VAR']
 
+# Define the Categories (Model+Size) for each category
 MODEL_SIZES = {
     'VQ-GAN': [
         '1.4B'
