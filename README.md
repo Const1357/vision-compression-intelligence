@@ -9,7 +9,7 @@ Recent work in language modeling has demonstrated strong scaling relationships b
 From the root of the project, run the `make` command to invoke the Makefile. This will:
  + Install dependencies from `requirements.txt`.
  + Clone the dependencies for other model implementations.
- + Download the imagenet dataset (for validation)
+ + Download the ImageNet dataset (for validation)
  + Download model checkpoints
   
 Note: due to the large size of these dependencies, the build is expected to take a lot of time. You can also see the `Makefile` and do the setup manually.
