@@ -66,7 +66,7 @@ ANCOVA analysis of the results groupped within architectures show the following:
 Further analysis showed that a bilinear model $\text{FID} = α + β_0\cdot\text{BPP} + β_1\cdot\text{rFID}$ increased global $R^2$ from 0.446 to 0.746 compared to the simple linear model $\text{FID} = α + β\cdot\text{BPP}$, with the rFID coefficient being statistically significant (p < 0.05). This demonstrates that tokenizer reconstruction quality explains a substantial fraction of image quality variation that cannot be attributed to compression alone.
 
 ## Conclusion
-+ Compression efficiency strongly correlates with image quality, but only within a fixed model family.
++ Compression efficiency presents a strong linear correlation with image quality, but only when the tokenizer is fixed.
 + Different architectures exhibit fundamentally different scaling laws, invalidating a universal compression-quality relationship.
 + Tokenizer rFID is an independent and significant predictor of image quality.
 + A bilinear model combining BPP and rFID provides the most accurate description of observed behavior.
