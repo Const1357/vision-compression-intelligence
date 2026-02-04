@@ -1,5 +1,3 @@
-(tf_env) georgdv2002@georgeDV2002:~/DSML/patrec/group_project$ cat analyze_results.py
-#!/usr/bin/env python3
 import json
 import os
 import itertools
