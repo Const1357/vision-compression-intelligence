@@ -58,12 +58,14 @@ ANCOVA analysis of the results groupped within architectures show the following:
 | [RQ-Transformer](https://github.com/kakaobrain/rq-vae-transformer.git)   | 3                | 54590.6 | 0.999| 0.999             |
 | [VAR](https://github.com/FoundationVision/VAR.git)              | 4                | 1277.7  | 0.719  | 0.848               |
 
-![bpp_vs_fid_global](resources/bpp_vs_fid_global.png)
-![overview.png](resources/overview.png)
+![global_bpp_fid_no_outlier](resources/global_bpp_fid_no_outlier.png)
+![overview.png](resources/all_families.png)
 
 
 
 Further analysis showed that a bilinear model $\text{FID} = α + β_0\cdot\text{BPP} + β_1\cdot\text{rFID}$ increased global $R^2$ from 0.446 to 0.746 compared to the simple linear model $\text{FID} = α + β\cdot\text{BPP}$, with the rFID coefficient being statistically significant (p < 0.05). This demonstrates that tokenizer reconstruction quality explains a substantial fraction of image quality variation that cannot be attributed to compression alone.
+
+![global_two_factor_model](resources/additive_global_fid_bpp_rfid.png)
 
 ## Conclusion
 + Compression efficiency presents a strong linear correlation with image quality, but only when the tokenizer is fixed.
