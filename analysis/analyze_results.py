@@ -1,3 +1,4 @@
+(tf_env) georgdv2002@georgeDV2002:~/DSML/patrec/group_project$ cat analyze_results.py
 #!/usr/bin/env python3
 import json
 import os
@@ -113,6 +114,7 @@ def load_results(results_dir: str) -> pd.DataFrame:
 
             m = data["metrics"]
             bpp_hist = m.get("bpp_history", [])
+            bpp_n = len(bpp_hist)
 
             model_type = str(data["model_type"])
             img_size = int(data["img_size"])
@@ -125,8 +127,10 @@ def load_results(results_dir: str) -> pd.DataFrame:
                 "FID": float(m["model_fid"]),
                 "RFID": float(m["tokenizer_rfid"]),
                 "BPP": float(m["model_bpp"]),
-                "BPP_std": float(np.std(bpp_hist)) if len(bpp_hist) > 0 else np.nan,
+                "BPP_std": float(np.std(bpp_hist, ddof=1)) if bpp_n >= 2 else np.nan,
+                "BPP_n": int(bpp_n),
             })
+
 
     return pd.DataFrame(rows)
 
@@ -265,15 +269,167 @@ def plot_rfid_1d(df: pd.DataFrame):
     plt.savefig(os.path.join(OUTPUT_DIR, "rfid_1d_distribution.png"), dpi=200)
     plt.close()
 
+def var_subset_correlation_and_plots(df: pd.DataFrame,
+                                     out_prefix: str = "var_bpp_fid",
+                                     label_fontsize: int = 9):
+    """
+    Compute Pearson(BPP, FID) inside VAR for:
+      - subset3: {310M, 600M, 1B}
+      - subset4: subset3 + {2B}  (outlier)
+    Save 2 plots + a small txt report.
+    """
+    g = df[df["Family"] == "VAR"].copy()
+    if g.empty:
+        return None
+
+    order3 = ["310M", "600M", "1B"]
+    order4 = ["310M", "600M", "1B", "2B"]
+
+    def pick(subset):
+        return g[g["ModelSize"].isin(subset)].copy()
+
+    def stats_block(subdf):
+        return {
+            "n": len(subdf),
+            "pearson_r": pearson_r(subdf["BPP"].values, subdf["FID"].values),
+            **fit_linear_bpp_to_fid(subdf["BPP"].values, subdf["FID"].values),
+        }
+
+    s3 = pick(order3)
+    s4 = pick(order4)
+
+    st3 = stats_block(s3) if len(s3) >= 2 else None
+    st4 = stats_block(s4) if len(s4) >= 2 else None
+
+    # -------- plots --------
+    def make_plot(subdf, title, out_png, highlight_2b=False):
+        plt.figure(figsize=(6.5, 5))
+        plt.scatter(subdf["BPP"], subdf["FID"], s=110, zorder=3)
+
+        for _, r in subdf.iterrows():
+            plt.text(float(r["BPP"]), float(r["FID"]), str(r["ModelSize"]),
+                     fontsize=label_fontsize, zorder=4)
+
+        # fit line if >=2 points
+        if len(subdf) >= 2:
+            st = fit_linear_bpp_to_fid(subdf["BPP"].values, subdf["FID"].values)
+            x = np.sort(subdf["BPP"].values.astype(float))
+            plt.plot(x, st["slope"] * x + st["intercept"], "--", linewidth=2.0, zorder=2)
+            plt.text(0.05, 0.95,
+                     f"r = {st['pearson_r']:.3f}\nR² = {st['r2']:.3f}",
+                     transform=plt.gca().transAxes, va="top")
+
+        # optionally emphasize 2B
+        if highlight_2b and ("2B" in subdf["ModelSize"].values):
+            r2b = subdf[subdf["ModelSize"] == "2B"].iloc[0]
+            plt.scatter([r2b["BPP"]], [r2b["FID"]], s=220, marker="x", zorder=5)
+
+        plt.xlabel("BPP")
+        plt.ylabel("FID")
+        plt.title(title)
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(os.path.join(OUTPUT_DIR, out_png), dpi=200)
+        plt.close()
+
+    make_plot(s3, "VAR: BPP vs FID (310M, 600M, 1B)", f"{out_prefix}_3pt.png")
+    make_plot(s4, "VAR: BPP vs FID (+ 2B outlier)", f"{out_prefix}_4pt.png", highlight_2b=True)
+
+    # -------- text report --------
+    out_txt = os.path.join(OUTPUT_DIR, f"{out_prefix}_stats.txt")
+    with open(out_txt, "w") as f:
+        f.write("VAR subset correlation (Pearson) + linear fit\n")
+        f.write("===========================================\n\n")
+        if st3 is not None:
+            f.write("Subset 3pt: {310M, 600M, 1B}\n")
+            f.write(f"n = {st3['n']}\n")
+            f.write(f"Pearson(BPP,FID) r = {st3['pearson_r']:.6f}\n")
+            f.write(f"Fit: FID = {st3['slope']:.6g} * BPP + {st3['intercept']:.6g}\n")
+            f.write(f"R^2 = {st3['r2']:.6f}\n\n")
+        if st4 is not None:
+            f.write("Subset 4pt: {310M, 600M, 1B, 2B}\n")
+            f.write(f"n = {st4['n']}\n")
+            f.write(f"Pearson(BPP,FID) r = {st4['pearson_r']:.6f}\n")
+            f.write(f"Fit: FID = {st4['slope']:.6g} * BPP + {st4['intercept']:.6g}\n")
+            f.write(f"R^2 = {st4['r2']:.6f}\n\n")
+
+        f.write("Saved plots:\n")
+        f.write(f"- {out_prefix}_3pt.png\n")
+        f.write(f"- {out_prefix}_4pt.png\n")
+
+    return {"subset3": st3, "subset4": st4, "txt": out_txt}
+
 
 global_stats = plot_global_bpp_fid(df)
 per_family_df = plot_per_family(df)
 plot_rfid_1d(df)
+var_subset_correlation_and_plots(df)
 
 
 # ==================================================
 # 3) ANCOVA: Are cluster slopes statistically similar?
 # ==================================================
+def slope_vs_rfid_across_families(df: pd.DataFrame,
+                                 min_n: int = 3,
+                                 out_txt: str = "family_slope_vs_rfid.txt",
+                                 out_png: str = "family_slope_vs_rfid.png"):
+    """
+    For each Family with n >= min_n:
+      - fit slope from FID ~ BPP (same as your per-family fit)
+      - compute mean RFID (also report std/min/max)
+    Then compute Pearson correlation across families: slope vs mean RFID.
+    """
+    rows = []
+    for fam, g in df.groupby("Family"):
+        if len(g) < min_n:
+            continue
+        st = fit_linear_bpp_to_fid(g["BPP"].values, g["FID"].values)
+        rows.append({
+            "Family": fam,
+            "n": int(len(g)),
+            "slope": float(st["slope"]),
+            "rfid_mean": float(np.mean(g["RFID"].values.astype(float))),
+            "rfid_std": float(np.std(g["RFID"].values.astype(float), ddof=1)) if len(g) >= 2 else np.nan,
+            "rfid_min": float(np.min(g["RFID"].values.astype(float))),
+            "rfid_max": float(np.max(g["RFID"].values.astype(float))),
+        })
+
+    fam_df = pd.DataFrame(rows)
+    out_txt_path = os.path.join(OUTPUT_DIR, out_txt)
+
+    if len(fam_df) < 2:
+        with open(out_txt_path, "w") as f:
+            f.write("Not enough families with n>=min_n to correlate slope vs RFID.\n")
+        return fam_df, out_txt_path
+
+    r = pearson_r(fam_df["slope"].values, fam_df["rfid_mean"].values)
+
+    # plot
+    plt.figure(figsize=(6.5, 5))
+    plt.scatter(fam_df["rfid_mean"], fam_df["slope"], s=120)
+    for _, row in fam_df.iterrows():
+        plt.text(float(row["rfid_mean"]), float(row["slope"]), str(row["Family"]), fontsize=9)
+    plt.xlabel("Family mean rFID")
+    plt.ylabel("Family slope (FID ~ BPP)")
+    plt.title(f"Slope vs rFID across families (n≥{min_n}), r = {r:.3f}")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, out_png), dpi=200)
+    plt.close()
+
+    with open(out_txt_path, "w") as f:
+        f.write("Slope (FID~BPP) vs rFID across families\n")
+        f.write("======================================\n\n")
+        f.write(f"Included families: n >= {min_n}\n")
+        f.write(f"Pearson(slope, mean_rFID) = {r:.6f}\n\n")
+        f.write("Per-family values:\n")
+        f.write(fam_df.sort_values("Family").to_string(index=False))
+        f.write("\n\nSaved plot:\n")
+        f.write(f"- {out_png}\n")
+
+    return fam_df, out_txt_path
+
+
 def slope_similarity_tests(df: pd.DataFrame, group_col: str = "Family"):
     df_s = df[[group_col, "BPP", "FID"]].dropna().copy()
     df_s[group_col] = df_s[group_col].astype(str)
@@ -483,8 +639,88 @@ def fit_fid_bpp_rfid_models(df: pd.DataFrame):
 
     return summary_df
 
+def per_model_prediction_table(df: pd.DataFrame,
+                               out_txt: str = "per_model_predictions_ascii.txt",
+                               out_csv: str = "per_model_predictions.csv"):
+    """
+    One row per checkpoint (global).
+    Columns: ModelType, ModelSize, FID, RFID, BPP,
+             yhat_BPP, yhat_Add, yhat_Int
+    Also includes residuals.
+    """
+    dm = df[["ModelType", "Family", "ModelSize", "BPP", "RFID", "FID", "BPP_std", "BPP_n"]].dropna().copy()
+    dm["BPP"] = dm["BPP"].astype(float)
+    dm["RFID"] = dm["RFID"].astype(float)
+    dm["FID"] = dm["FID"].astype(float)
+
+    # Centering consistent with your regression section
+    dm["BPP_c"] = dm["BPP"] - dm["BPP"].mean()
+    dm["RFID_c"] = dm["RFID"] - dm["RFID"].mean()
+
+    m_bpp = smf.ols("FID ~ BPP_c", data=dm).fit()
+    m_add = smf.ols("FID ~ BPP_c + RFID_c", data=dm).fit()
+    m_int = smf.ols("FID ~ BPP_c * RFID_c", data=dm).fit()
+
+    dm["yhat_BPP"] = m_bpp.predict(dm)
+    dm["yhat_Add"] = m_add.predict(dm)
+    dm["yhat_Int"] = m_int.predict(dm)
+
+    dm["res_BPP"] = dm["FID"] - dm["yhat_BPP"]
+    dm["res_Add"] = dm["FID"] - dm["yhat_Add"]
+    dm["res_Int"] = dm["FID"] - dm["yhat_Int"]
+
+    # 95% CI for BPP from history (if available)
+    z = 1.96
+    dm["BPP_se"] = np.where(dm["BPP_n"].fillna(0).astype(int) >= 2,
+                            dm["BPP_std"] / np.sqrt(dm["BPP_n"].astype(float)),
+                            np.nan)
+    dm["BPP_ci_lo"] = dm["BPP"] - z * dm["BPP_se"]
+    dm["BPP_ci_hi"] = dm["BPP"] + z * dm["BPP_se"]
+
+    # Save CSV (full precision)
+    out_csv_path = os.path.join(OUTPUT_DIR, out_csv)
+    dm.to_csv(out_csv_path, index=False)
+
+    # ASCII table (pretty printed)
+    show = dm[[
+        "ModelType", "ModelSize", "FID", "RFID", "BPP",
+        "BPP_ci_lo", "BPP_ci_hi",
+        "yhat_BPP", "yhat_Add", "yhat_Int"
+    ]].copy()
+
+    show["BPP"] = show.apply(
+        lambda r: (
+            f"{r['BPP']:.6f} ± {(r['BPP_ci_hi'] - r['BPP']):.6f}"
+            if np.isfinite(r["BPP_ci_hi"])
+            else f"{r['BPP']:.6f}"
+        ),
+        axis=1
+    )
+
+    fmt = {
+        "FID": "{:.3f}".format,
+        "RFID": "{:.3f}".format,
+        "yhat_BPP": "{:.3f}".format,
+        "yhat_Add": "{:.3f}".format,
+        "yhat_Int": "{:.3f}".format,
+    }
+
+    for c, f in fmt.items():
+        show[c] = show[c].map(f)
+
+    # (Optional) order like your slide: by ModelType then some size ordering
+    out_txt_path = os.path.join(OUTPUT_DIR, out_txt)
+    with open(out_txt_path, "w") as f:
+        f.write("Per-checkpoint table (global)\n")
+        f.write("============================\n")
+        f.write("BPP CI is 95% CI from bpp_history (if present).\n\n")
+        f.write(show.to_string(index=False))
+        f.write("\n")
+
+    return dm, out_txt_path, out_csv_path
 
 fid_bpp_rfid_summary = fit_fid_bpp_rfid_models(df)
+pred_dm, pred_txt, pred_csv = per_model_prediction_table(df)
 
 # ==================================================
 # 4B) VISUALIZE BILINEAR MODEL: FID ~ BPP + RFID (+ interaction)
@@ -761,6 +997,7 @@ def plot_bilinear_3d_per_family(df: pd.DataFrame, min_n: int = 3, grid_n: int = 
 m_int_global = plot_bilinear_3d(df)
 m_add_global = plot_bilinear_3d_additive(df)
 plot_bilinear_3d_per_family(df, min_n=3)
+fam_slope_df, fam_slope_txt = slope_vs_rfid_across_families(df, min_n=3)
 
 # ==================================================
 # 5) MAIN TEXT REPORT (single place)
@@ -799,8 +1036,15 @@ with open(REPORT_TXT, "w") as f:
     f.write(f"- {os.path.basename(FID_BPP_RFID_TXT)}\n")
     f.write(f"- {os.path.basename(FID_BPP_RFID_CSV)}\n")
 
+    f.write("- var_bpp_fid_3pt.png\n")
+    f.write("- var_bpp_fid_4pt.png\n")
+    f.write("- var_bpp_fid_stats.txt\n")
+    f.write("- per_model_predictions_ascii.txt\n")
+    f.write("- per_model_predictions.csv\n")
+    f.write("- family_slope_vs_rfid.txt\n")
+    f.write("- family_slope_vs_rfid.png\n")
+
 print("\nAnalysis complete.")
 print(f"Main report: {REPORT_TXT}")
 print(f"ANCOVA slope tests: {SLOPE_REPORT_TXT}")
 print(f"FID~(BPP,RFID) models: {FID_BPP_RFID_TXT}")
-
